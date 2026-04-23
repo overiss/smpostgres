@@ -25,6 +25,16 @@ func TestSingleProvider_NewSingle(t *testing.T) {
 		}
 		p.Close()
 	})
+
+	t.Run("min conns exceeds auto max", func(t *testing.T) {
+		_, err := NewSingle(context.Background(), NodeConfig{
+			DSN:      "postgres://user:pass@localhost:5432/db?sslmode=disable",
+			MinConns: defaultMaxConns() + 1,
+		})
+		if err == nil {
+			t.Fatal("expected error for min conns above auto max")
+		}
+	})
 }
 
 func TestSingleProvider_NewFromGenericConfig(t *testing.T) {

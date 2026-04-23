@@ -27,12 +27,8 @@ func TestMasterReplicaProvider_NewMasterReplica(t *testing.T) {
 			Master: NodeConfig{
 				DSN: "postgres://user:pass@localhost:5432/db?sslmode=disable",
 			},
-			SyncReplicas: []NodeConfig{
-				{DSN: "postgres://user:pass@localhost:5433/db?sslmode=disable"},
-			},
-			AsyncReplicas: []NodeConfig{
-				{DSN: "postgres://user:pass@localhost:5434/db?sslmode=disable"},
-			},
+			SyncReplica:  &NodeConfig{DSN: "postgres://user:pass@localhost:5433/db?sslmode=disable"},
+			AsyncReplica: &NodeConfig{DSN: "postgres://user:pass@localhost:5434/db?sslmode=disable"},
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -46,23 +42,21 @@ func TestMasterReplicaProvider_NewMasterReplica(t *testing.T) {
 
 func TestMasterReplicaProvider_Routing(t *testing.T) {
 	master := new(pgxpool.Pool)
-	sync1 := new(pgxpool.Pool)
-	sync2 := new(pgxpool.Pool)
-	async1 := new(pgxpool.Pool)
+	syncReplica := new(pgxpool.Pool)
+	asyncReplica := new(pgxpool.Pool)
 
 	p := &MasterReplicaProvider{
 		readPreference: ReadPreferReplica,
 		master:         master,
-		syncReplicas:   []*pgxpool.Pool{sync1, sync2},
-		asyncReplicas:  []*pgxpool.Pool{async1},
-		anyReplicas:    []*pgxpool.Pool{sync1, sync2, async1},
+		syncReplica:    syncReplica,
+		asyncReplica:   asyncReplica,
 	}
 
-	if got := p.pickSyncReplicaPool(); got == nil {
+	if got := p.pickSyncReplicaPool(); got != syncReplica {
 		t.Fatal("expected sync replica pool")
 	}
-	if got := p.pickAsyncReplicaPool(); got != async1 {
-		t.Fatalf("expected async1, got %p", got)
+	if got := p.pickAsyncReplicaPool(); got != asyncReplica {
+		t.Fatal("expected async replica pool")
 	}
 	if got := p.pickReadPool(); got == nil {
 		t.Fatal("expected read pool with prefer-replica")
@@ -82,12 +76,8 @@ func TestMasterReplicaProvider_NewFromGenericConfig(t *testing.T) {
 		Master: &NodeConfig{
 			DSN: "postgres://user:pass@localhost:5432/db?sslmode=disable",
 		},
-		SyncReplicas: []NodeConfig{
-			{DSN: "postgres://user:pass@localhost:5433/db?sslmode=disable"},
-		},
-		AsyncReplicas: []NodeConfig{
-			{DSN: "postgres://user:pass@localhost:5434/db?sslmode=disable"},
-		},
+		SyncReplica:  &NodeConfig{DSN: "postgres://user:pass@localhost:5433/db?sslmode=disable"},
+		AsyncReplica: &NodeConfig{DSN: "postgres://user:pass@localhost:5434/db?sslmode=disable"},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

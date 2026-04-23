@@ -6,6 +6,18 @@
 2. Вызвать `smpostgres.Init(...)` или `smpostgres.New(...)`.
 3. Работать через единый интерфейс `Provider`.
 
+## Зачем нужна библиотека
+
+В большинстве сервисов повторяется один и тот же код:
+
+- парсинг DSN и инициализация `pgxpool`,
+- выбор куда отправлять `read`/`write`,
+- readiness проверки,
+- корректное закрытие пулов,
+- подбор безопасных дефолтов по коннектам.
+
+`smpostgres` выносит это в один пакет, чтобы в прикладном коде осталась только бизнес-логика.
+
 Поддерживаемые режимы:
 
 - `single` - один инстанс PostgreSQL.
@@ -70,11 +82,11 @@ err := smpostgres.Init(ctx, smpostgres.Config{
 	Master: &smpostgres.NodeConfig{
 		DSN: "postgres://writer:pass@pg-master:5432/appdb?sslmode=disable",
 	},
-	SyncReplicas: []smpostgres.NodeConfig{
-		{DSN: "postgres://reader:pass@pg-replica-sync-1:5432/appdb?sslmode=disable"},
+	SyncReplica: &smpostgres.NodeConfig{
+		DSN: "postgres://reader:pass@pg-replica-sync:5432/appdb?sslmode=disable",
 	},
-	AsyncReplicas: []smpostgres.NodeConfig{
-		{DSN: "postgres://reader:pass@pg-replica-async-1:5432/appdb?sslmode=disable"},
+	AsyncReplica: &smpostgres.NodeConfig{
+		DSN: "postgres://reader:pass@pg-replica-async:5432/appdb?sslmode=disable",
 	},
 })
 if err != nil {
@@ -91,11 +103,11 @@ cluster, err := smpostgres.NewMasterReplica(ctx, smpostgres.MasterReplicaConfig{
 	Master: smpostgres.NodeConfig{
 		DSN: "postgres://writer:pass@pg-master:5432/appdb?sslmode=disable",
 	},
-	SyncReplicas: []smpostgres.NodeConfig{
-		{DSN: "postgres://reader:pass@pg-replica-sync-1:5432/appdb?sslmode=disable"},
+	SyncReplica: &smpostgres.NodeConfig{
+		DSN: "postgres://reader:pass@pg-replica-sync:5432/appdb?sslmode=disable",
 	},
-	AsyncReplicas: []smpostgres.NodeConfig{
-		{DSN: "postgres://reader:pass@pg-replica-async-1:5432/appdb?sslmode=disable"},
+	AsyncReplica: &smpostgres.NodeConfig{
+		DSN: "postgres://reader:pass@pg-replica-async:5432/appdb?sslmode=disable",
 	},
 })
 if err != nil {
@@ -139,3 +151,15 @@ w.WriteHeader(http.StatusOK)
 
 - Контракт readiness: `IsReady() bool` и `Name() string`.
 - Для default-провайдера есть helper: `smpostgres.IsDefaultReady()`.
+- `IsReady()` использует кешированный статус (обновляется фоновым lightweight-monitor), поэтому вызов дешевый по CPU.
+
+## Оптимизации по умолчанию
+
+Библиотека оптимизирована так, чтобы разработчику не приходилось отдельно тюнить поведение под каждую службу.
+
+- **Авто-тюнинг соединений**: если `NodeConfig.MaxConns == 0`, пакет ставит безопасный лимит пула на основе CPU (`4 * GOMAXPROCS`, максимум `32`). Это снижает риск перегруза PostgreSQL лишними коннектами и уменьшает расход памяти.
+- **Дешевый readiness**: `IsReady()` возвращает кешированный статус, который обновляется фоновым lightweight-monitor. В результате `/readyz` не создает дорогой `Ping` на каждый HTTP-запрос.
+- **Предсказуемый read routing**: в cluster-модели есть один `sync` и один `async` хост, а маршрутизация чтения унифицирована внутри клиента (`Query`, `QuerySyncReplica`, `QueryAsyncReplica`).
+- **Безопасное освобождение ресурсов**: все пулы закрываются корректно и идемпотентно через `Close()`, включая остановку фоновых readiness-проверок.
+
+Итог: меньше boilerplate в сервисах, ниже вероятность ошибок конфигурации и более стабильное потребление CPU/памяти в production.
